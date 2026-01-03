@@ -1,5 +1,6 @@
 // RepoX - Main Entry Point
 import './style.css';
+import './app.css';
 import {
   getState,
   subscribe,
@@ -8,6 +9,7 @@ import {
   setRepoUrl,
   setRepoData,
   goToLanding,
+  selectFile,
 } from './state';
 import {
   isValidGitHubUrl,
@@ -40,6 +42,7 @@ const ASCII_ART = `
 function renderHeader(): string {
   const state = getState();
   const rateLimit = getRateLimitInfo();
+  const hasLearningPath = state.currentRepo ? getSavedLearningPath(state.currentRepo.fullName) !== null : false;
   
   return `
     <header class="header">
@@ -52,6 +55,11 @@ function renderHeader(): string {
           <span class="rate-limit ${rateLimit.remaining < 10 ? 'warning' : ''}">
             API: ${rateLimit.remaining}/${rateLimit.limit}
           </span>
+          ${state.currentRepo && hasLearningPath ? `
+            <button id="show-learning-path-btn" class="btn btn-ghost">
+              Learning Path
+            </button>
+          ` : ''}
           ${state.currentRepo ? `
             <a href="${state.currentRepo.url}" target="_blank" rel="noopener" class="btn btn-ghost">
               View on GitHub
@@ -225,21 +233,24 @@ function renderGraphPanel(): string {
  * Render welcome panel when no file is selected
  */
 function renderWelcomePanel(): string {
-  const fileCount = countFiles(getState().fileTree);
+  const state = getState();
+  const fileCount = countFiles(state.fileTree);
+  const repo = state.currentRepo;
   
   return `
     <div class="welcome-panel">
       <div class="welcome-icon">📂</div>
-      <h2>Select a file to explore</h2>
+      <h2>Ready to Learn ${repo?.repo || 'This Repo'}</h2>
       <p class="text-muted">
         This repository contains ${fileCount} files. 
-        Click on any file in the sidebar to view details and get AI explanations.
+        Generate a personalized learning path or select a file to explore.
       </p>
       <div class="welcome-actions">
-        <button class="btn btn-primary" id="generate-path-btn" disabled>
-          Generate Learning Path (Coming in Step 5)
+        <button class="btn btn-primary" id="generate-path-btn">
+          Generate Learning Path
         </button>
       </div>
+      <div id="learning-path-container"></div>
     </div>
   `;
 }
@@ -309,7 +320,7 @@ function render(): void {
     styleEl.id = styleId;
     document.head.appendChild(styleEl);
   }
-  styleEl.textContent = getFileTreeStyles() + getGraphStyles() + getRepoViewStyles();
+  styleEl.textContent = getFileTreeStyles() + getGraphStyles();
 
   app.innerHTML = `
     ${renderHeader()}
@@ -322,362 +333,6 @@ function render(): void {
   `;
 
   attachEventListeners();
-}
-
-/**
- * Get repo view styles
- */
-function getRepoViewStyles(): string {
-  return `
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-    }
-    
-    .rate-limit {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      color: var(--color-text-muted);
-      padding: var(--space-1) var(--space-2);
-      background: var(--color-surface);
-      border-radius: var(--radius-sm);
-    }
-    
-    .rate-limit.warning {
-      color: var(--color-warning);
-      border: 1px solid var(--color-warning);
-    }
-    
-    .repo-view {
-      display: grid;
-      grid-template-columns: var(--sidebar-width) 1fr;
-      height: calc(100vh - var(--header-height) - 60px);
-      overflow: hidden;
-    }
-    
-    .sidebar {
-      background: var(--color-surface);
-      border-right: 1px solid var(--color-border);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    
-    .sidebar-header {
-      padding: var(--space-4);
-      border-bottom: 1px solid var(--color-border);
-    }
-    
-    .sidebar-tabs {
-      display: flex;
-      border-bottom: 1px solid var(--color-border);
-    }
-    
-    .tab-btn {
-      flex: 1;
-      padding: var(--space-3);
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--color-text-muted);
-      font-family: var(--font-mono);
-      font-size: var(--text-sm);
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-    
-    .tab-btn:hover {
-      background: var(--color-surface-hover);
-      color: var(--color-text);
-    }
-    
-    .tab-btn.active {
-      color: var(--color-accent-primary);
-      border-bottom-color: var(--color-accent-primary);
-    }
-    
-    .sidebar-content {
-      flex: 1;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
-    
-    .sidebar-graph {
-      width: 100%;
-      height: 100%;
-      min-height: 300px;
-    }
-    
-    .repo-info-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: var(--space-2);
-      flex-wrap: wrap;
-    }
-    
-    .repo-name {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-family: var(--font-mono);
-      font-weight: 600;
-      font-size: var(--text-sm);
-    }
-    
-    .repo-stats {
-      display: flex;
-      gap: var(--space-3);
-      font-size: var(--text-xs);
-      color: var(--color-text-muted);
-    }
-    
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    
-    .repo-description {
-      margin-top: var(--space-3);
-      font-size: var(--text-sm);
-      color: var(--color-text-muted);
-      line-height: 1.4;
-    }
-    
-    .content-area {
-      background: var(--color-bg);
-      overflow-y: auto;
-      padding: var(--space-6);
-    }
-    
-    .welcome-panel {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      text-align: center;
-      padding: var(--space-8);
-    }
-    
-    .welcome-icon {
-      font-size: 4rem;
-      margin-bottom: var(--space-4);
-    }
-    
-    .welcome-panel h2 {
-      margin-bottom: var(--space-2);
-    }
-    
-    .welcome-panel p {
-      max-width: 400px;
-      margin-bottom: var(--space-6);
-    }
-    
-    .file-panel {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .file-panel-header {
-      margin-bottom: var(--space-4);
-      padding-bottom: var(--space-4);
-      border-bottom: 1px solid var(--color-border);
-    }
-    
-    .file-panel-title {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      margin-bottom: var(--space-1);
-    }
-    
-    .file-path {
-      font-family: var(--font-mono);
-      font-size: var(--text-sm);
-    }
-    
-    .file-actions {
-      display: flex;
-      gap: var(--space-3);
-      margin-bottom: var(--space-4);
-    }
-    
-    .file-preview {
-      flex: 1;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      padding: var(--space-4);
-      overflow: auto;
-      font-family: var(--font-mono);
-      font-size: var(--text-sm);
-      white-space: pre-wrap;
-    }
-    
-    .eli5-toggle {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      font-size: var(--text-sm);
-      color: var(--color-text-muted);
-      cursor: pointer;
-      margin-left: auto;
-    }
-    
-    .eli5-toggle input {
-      accent-color: var(--color-accent-primary);
-    }
-    
-    .ai-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 200px;
-      text-align: center;
-    }
-    
-    .ai-explanation {
-      line-height: 1.6;
-    }
-    
-    .ai-explanation h2, .ai-explanation h3, .ai-explanation h4 {
-      margin-top: var(--space-4);
-      margin-bottom: var(--space-2);
-      color: var(--color-accent-primary);
-    }
-    
-    .ai-explanation code {
-      background: var(--color-bg);
-      padding: 2px 6px;
-      border-radius: var(--radius-sm);
-    }
-    
-    .ai-explanation pre {
-      background: var(--color-bg);
-      padding: var(--space-3);
-      border-radius: var(--radius-md);
-      overflow-x: auto;
-    }
-    
-    .ai-explanation ul, .ai-explanation ol {
-      margin: var(--space-2) 0;
-      padding-left: var(--space-5);
-    }
-    
-    .ai-error {
-      padding: var(--space-4);
-      background: rgba(255, 107, 53, 0.1);
-      border: 1px solid var(--color-accent-secondary);
-      border-radius: var(--radius-md);
-    }
-    
-    /* Graph Panel Styles */
-    .graph-panel {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .graph-panel-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: var(--space-4);
-      padding-bottom: var(--space-3);
-      border-bottom: 1px solid var(--color-border);
-    }
-    
-    .graph-panel-header h3 {
-      margin: 0;
-    }
-    
-    .graph-controls-inline {
-      display: flex;
-      gap: var(--space-2);
-    }
-    
-    .btn-sm {
-      padding: var(--space-2) var(--space-3);
-      font-size: var(--text-xs);
-    }
-    
-    .graph-full-container {
-      flex: 1;
-      min-height: 400px;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
-    
-    .graph-legend-inline {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-4);
-      padding: var(--space-3) 0;
-      font-size: var(--text-xs);
-      color: var(--color-text-muted);
-    }
-    
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
-    
-    .legend-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-    
-    .graph-file-info {
-      display: none;
-      align-items: center;
-      gap: var(--space-3);
-      padding: var(--space-3) var(--space-4);
-      background: var(--color-accent-primary);
-      color: var(--color-bg);
-      border-radius: var(--radius-md);
-      font-family: var(--font-mono);
-      font-size: var(--text-sm);
-      margin-top: var(--space-2);
-    }
-    
-    .file-info-icon {
-      font-size: var(--text-lg);
-    }
-    
-    .file-info-name {
-      font-weight: 600;
-    }
-    
-    .file-info-path {
-      opacity: 0.8;
-      font-size: var(--text-xs);
-    }
-    
-    .file-info-size {
-      margin-left: auto;
-      opacity: 0.8;
-    }
-    
-    @media (max-width: 768px) {
-      .repo-view {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto 1fr;
-      }
-      
-      .sidebar {
-        max-height: 40vh;
-      }
-    }
-  `;
 }
 
 /**
@@ -758,6 +413,25 @@ function attachEventListeners(): void {
     if (eli5Checkbox) {
       eli5Checkbox.addEventListener('change', () => {
         localStorage.setItem('repox_eli5', eli5Checkbox.checked.toString());
+      });
+    }
+    
+    const generatePathBtn = document.getElementById('generate-path-btn');
+    if (generatePathBtn) {
+      generatePathBtn.addEventListener('click', handleGenerateLearningPath);
+    }
+    
+    // Learning Path button in header
+    const showPathBtn = document.getElementById('show-learning-path-btn');
+    if (showPathBtn) {
+      showPathBtn.addEventListener('click', () => {
+        // Deselect current file to show welcome panel with learning path
+        selectFile(null, true);
+        render();
+        // After render, trigger the learning path display
+        setTimeout(() => {
+          handleGenerateLearningPath();
+        }, 50);
       });
     }
   }
@@ -908,6 +582,234 @@ function renderMarkdown(text: string): string {
       if (match.startsWith('<')) return match;
       return match;
     });
+}
+
+/**
+ * Build file structure string from tree for learning path API
+ */
+function buildFileStructure(node: import('./types').FileNode, prefix = ''): string {
+  let result = prefix + node.name + (node.type === 'folder' ? '/' : '') + '\n';
+  if (node.children) {
+    for (const child of node.children.slice(0, 100)) { // Limit to 100 items
+      result += buildFileStructure(child, prefix + '  ');
+    }
+  }
+  return result;
+}
+
+/**
+ * Handle Generate Learning Path button
+ */
+async function handleGenerateLearningPath(): Promise<void> {
+  const state = getState();
+  const repo = state.currentRepo;
+  const fileTree = state.fileTree;
+  
+  if (!repo || !fileTree) return;
+  
+  const container = document.getElementById('learning-path-container');
+  const btn = document.getElementById('generate-path-btn') as HTMLButtonElement;
+  if (!container) return;
+  
+  // Check for saved learning path first
+  const savedPath = getSavedLearningPath(repo.fullName);
+  if (savedPath && !container.querySelector('.learning-path')) {
+    container.innerHTML = renderLearningPathUI(savedPath, repo.fullName);
+    attachLearningPathListeners(repo.fullName);
+    return;
+  }
+  
+  // Show loading
+  container.innerHTML = `
+    <div class="learning-path-loading">
+      <div class="spinner"></div>
+      <p>Generating personalized learning path...</p>
+      <p class="text-muted">This may take 10-20 seconds</p>
+    </div>
+  `;
+  if (btn) btn.disabled = true;
+  
+  try {
+    const { generateLearningPath } = await import('./services');
+    
+    const fileStructure = buildFileStructure(fileTree);
+    
+    const learningPath = await generateLearningPath({
+      repoName: repo.fullName,
+      repoDescription: repo.description || undefined,
+      fileStructure,
+      languages: repo.language ? [repo.language] : undefined,
+    });
+    
+    // Save to localStorage
+    saveLearningPath(repo.fullName, learningPath);
+    
+    container.innerHTML = renderLearningPathUI(learningPath, repo.fullName);
+    attachLearningPathListeners(repo.fullName);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    container.innerHTML = `
+      <div class="ai-error">
+        <p><strong>Failed to generate learning path</strong></p>
+        <p class="text-muted">${errorMessage}</p>
+      </div>
+    `;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/**
+ * Save learning path to localStorage
+ */
+function saveLearningPath(repoName: string, path: import('./services').LearningPath): void {
+  const key = `repox_learning_path_${repoName}`;
+  localStorage.setItem(key, JSON.stringify(path));
+}
+
+/**
+ * Get saved learning path from localStorage
+ */
+function getSavedLearningPath(repoName: string): import('./services').LearningPath | null {
+  const key = `repox_learning_path_${repoName}`;
+  const saved = localStorage.getItem(key);
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get module completion state from localStorage
+ */
+function getModuleCompletion(repoName: string): Record<number, boolean> {
+  const key = `repox_module_completion_${repoName}`;
+  const saved = localStorage.getItem(key);
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+/**
+ * Save module completion state to localStorage
+ */
+function saveModuleCompletion(repoName: string, moduleIndex: number, completed: boolean): void {
+  const completion = getModuleCompletion(repoName);
+  completion[moduleIndex] = completed;
+  const key = `repox_module_completion_${repoName}`;
+  localStorage.setItem(key, JSON.stringify(completion));
+}
+
+/**
+ * Attach event listeners for learning path checkboxes
+ */
+function attachLearningPathListeners(repoName: string): void {
+  const checkboxes = document.querySelectorAll('.module-checkbox');
+  checkboxes.forEach((checkbox, i) => {
+    checkbox.addEventListener('change', (e) => {
+      const target = e.target as HTMLInputElement;
+      saveModuleCompletion(repoName, i, target.checked);
+      
+      // Update module appearance
+      const module = target.closest('.learning-module');
+      if (module) {
+        module.classList.toggle('completed', target.checked);
+      }
+    });
+  });
+}
+
+/**
+ * Render learning path UI
+ */
+function renderLearningPathUI(path: import('./services').LearningPath, repoName: string): string {
+  // Handle case where path is a string (raw response)
+  if (typeof path === 'string') {
+    return `<div class="ai-explanation">${renderMarkdown(path)}</div>`;
+  }
+  
+  const completion = getModuleCompletion(repoName);
+  
+  const modulesHtml = path.modules?.map((module, i) => {
+    const isCompleted = completion[i] || false;
+    return `
+    <div class="learning-module${isCompleted ? ' completed' : ''}">
+      <div class="module-header">
+        <input type="checkbox" class="module-checkbox" ${isCompleted ? 'checked' : ''} data-index="${i}" />
+        <span class="module-number">${i + 1}</span>
+        <div class="module-info">
+          <h4>${module.title}</h4>
+          <span class="module-time">${module.estimatedMinutes} min</span>
+        </div>
+      </div>
+      <p class="module-description">${module.description}</p>
+      <div class="module-files">
+        <strong>Files to study:</strong>
+        <ul>
+          ${module.files?.map(f => `<li data-file="${f}"><code>${f}</code></li>`).join('') || '<li>No specific files</li>'}
+        </ul>
+      </div>
+      <div class="module-objectives">
+        <strong>Objectives:</strong>
+        <ul>
+          ${module.objectives?.map(o => `<li>${o}</li>`).join('') || '<li>Complete module</li>'}
+        </ul>
+      </div>
+    </div>
+  `;
+  }).join('') || '';
+  
+  const projectsHtml = path.projects?.map(project => `
+    <div class="project-card">
+      <span class="project-difficulty ${project.difficulty}">${project.difficulty}</span>
+      <h4>${project.title}</h4>
+      <p>${project.description}</p>
+    </div>
+  `).join('') || '';
+  
+  return `
+    <div class="learning-path">
+      <div class="learning-path-header">
+        <h3>Your Learning Path</h3>
+      </div>
+      
+      <div class="learning-path-overview">
+        <p>${path.overview || 'A structured path to learn this repository.'}</p>
+      </div>
+      
+      ${path.prerequisites?.length ? `
+        <div class="learning-path-prereqs">
+          <h4>Prerequisites</h4>
+          <ul>
+            ${path.prerequisites.map(p => `<li>${p}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+      
+      <div class="learning-path-modules">
+        <h4>Learning Modules</h4>
+        ${modulesHtml || '<p class="text-muted">No modules generated</p>'}
+      </div>
+      
+      ${path.projects?.length ? `
+        <div class="learning-path-projects">
+          <h4>Practice Projects</h4>
+          <div class="projects-grid">
+            ${projectsHtml}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
 }
 
 // Subscribe to state changes
