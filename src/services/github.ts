@@ -336,52 +336,70 @@ interface OSSInsightResponse {
 }
 
 /**
- * Fetch trending repositories from OSS Insight API (cached)
+ * Shuffle array using Fisher-Yates algorithm
+ */
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+/**
+ * Fetch trending repositories from OSS Insight API
+ * Caches full response, returns random 3 for variety
  */
 export async function fetchTrendingRepos(): Promise<TrendingRepo[]> {
+  let allRepos: TrendingRepo[] = [];
+  
   // Check cache first
   try {
     const cached = localStorage.getItem(TRENDING_CACHE_KEY);
     if (cached) {
       const { repos, timestamp } = JSON.parse(cached);
       if (Date.now() - timestamp < TRENDING_CACHE_DURATION) {
-        return repos;
+        allRepos = repos;
       }
     }
   } catch {
     // Ignore cache errors
   }
 
-  // Fetch from OSS Insight API - actual trending repos
-  const response = await fetch(
-    'https://api.ossinsight.io/v1/trends/repos?period=past_week&per_page=3'
-  );
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch trending repos');
-  }
-  
-  const data: OSSInsightResponse = await response.json();
+  // If no valid cache, fetch fresh data
+  if (allRepos.length === 0) {
+    const response = await fetch(
+      'https://api.ossinsight.io/v1/trends/repos?period=past_week'
+    );
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch trending repos');
+    }
+    
+    const data: OSSInsightResponse = await response.json();
 
-  const repos: TrendingRepo[] = data.data.rows.slice(0, 3).map(item => ({
-    fullName: item.repo_name,
-    description: item.description,
-    stars: parseInt(item.stars) || 0,
-    language: item.primary_language,
-    url: `https://github.com/${item.repo_name}`,
-  }));
-
-  // Cache the result
-  try {
-    localStorage.setItem(TRENDING_CACHE_KEY, JSON.stringify({
-      repos,
-      timestamp: Date.now(),
+    allRepos = data.data.rows.map(item => ({
+      fullName: item.repo_name,
+      description: item.description,
+      stars: parseInt(item.stars) || 0,
+      language: item.primary_language,
+      url: `https://github.com/${item.repo_name}`,
     }));
-  } catch {
-    // Ignore storage errors
+
+    // Cache all repos
+    try {
+      localStorage.setItem(TRENDING_CACHE_KEY, JSON.stringify({
+        repos: allRepos,
+        timestamp: Date.now(),
+      }));
+    } catch {
+      // Ignore storage errors
+    }
   }
 
-  return repos;
+  // Return random 3 from the full list
+  return shuffleArray(allRepos).slice(0, 3);
 }
 
 // Saved repo history
