@@ -16,6 +16,10 @@ import {
   parseGitHubUrl,
   fetchRepository,
   getRateLimitInfo,
+  getRepoHistory,
+  fetchTrendingRepos,
+  saveRepoToHistory,
+  type TrendingRepo,
 } from './services';
 import {
   renderFileTree,
@@ -76,6 +80,7 @@ function renderHeader(): string {
  */
 function renderLanding(): string {
   const state = getState();
+  const history = getRepoHistory();
   
   return `
     <section class="landing">
@@ -105,31 +110,66 @@ function renderLanding(): string {
 
       ${state.error ? `
         <div class="error-message">
-          <span>⚠</span>
+          <span>!</span>
           <span>${state.error}</span>
         </div>
       ` : ''}
 
       <div class="features">
         <div class="feature-pill">
-          <span class="icon">◈</span>
+          <span class="icon">+</span>
           <span>Interactive Graphs</span>
         </div>
         <div class="feature-pill">
-          <span class="icon">◈</span>
+          <span class="icon">+</span>
           <span>AI Explanations</span>
         </div>
         <div class="feature-pill">
-          <span class="icon">◈</span>
+          <span class="icon">+</span>
           <span>Learning Paths</span>
         </div>
         <div class="feature-pill">
-          <span class="icon">◈</span>
+          <span class="icon">+</span>
           <span>Code Challenges</span>
+        </div>
+      </div>
+      
+      ${history.length > 0 ? `
+        <div class="repo-section">
+          <h3 class="section-title">Recent</h3>
+          <div class="repo-cards" id="history-cards">
+            ${history.slice(0, 3).map(repo => `
+              <button class="repo-card" data-url="${repo.url}">
+                <div class="repo-card-header">
+                  <span class="repo-card-name">${repo.fullName}</span>
+                  <span class="repo-card-stars">${formatStars(repo.stars)}</span>
+                </div>
+                <p class="repo-card-desc">${repo.description || 'No description'}</p>
+                ${repo.language ? `<span class="repo-card-lang">${repo.language}</span>` : ''}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+      
+      <div class="repo-section">
+        <h3 class="section-title">Trending This Week</h3>
+        <div class="repo-cards" id="trending-cards">
+          <div class="loading-placeholder">Loading trending repos...</div>
         </div>
       </div>
     </section>
   `;
+}
+
+/**
+ * Format star count for display
+ */
+function formatStars(stars: number): string {
+  if (stars >= 1000) {
+    return (stars / 1000).toFixed(1) + 'k';
+  }
+  return stars.toString();
 }
 
 /**
@@ -363,6 +403,20 @@ function attachEventListeners(): void {
     if (button) {
       button.addEventListener('click', handleExplore);
     }
+    
+    // Repo card click handlers
+    document.querySelectorAll('.repo-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const url = (card as HTMLElement).dataset.url;
+        if (url) {
+          setRepoUrl(url);
+          handleExplore();
+        }
+      });
+    });
+    
+    // Load trending repos
+    loadTrendingRepos();
   } else {
     // Repo view listeners
     const currentTab = localStorage.getItem('repox_view_tab') || 'tree';
@@ -463,9 +517,45 @@ async function handleExplore(): Promise<void> {
 
   try {
     const { info, tree } = await fetchRepository(parsed.owner, parsed.repo);
+    saveRepoToHistory(info);
     setRepoData(info, tree);
   } catch (err) {
     setError(err instanceof Error ? err.message : 'Failed to fetch repository');
+  }
+}
+
+/**
+ * Load trending repos asynchronously
+ */
+async function loadTrendingRepos(): Promise<void> {
+  const container = document.getElementById('trending-cards');
+  if (!container) return;
+  
+  try {
+    const repos = await fetchTrendingRepos();
+    container.innerHTML = repos.map((repo: TrendingRepo) => `
+      <button class="repo-card" data-url="${repo.url}">
+        <div class="repo-card-header">
+          <span class="repo-card-name">${repo.fullName}</span>
+          <span class="repo-card-stars">${formatStars(repo.stars)}</span>
+        </div>
+        <p class="repo-card-desc">${repo.description || 'No description'}</p>
+        ${repo.language ? `<span class="repo-card-lang">${repo.language}</span>` : ''}
+      </button>
+    `).join('');
+    
+    // Attach click handlers to new cards
+    container.querySelectorAll('.repo-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const url = (card as HTMLElement).dataset.url;
+        if (url) {
+          setRepoUrl(url);
+          handleExplore();
+        }
+      });
+    });
+  } catch (err) {
+    container.innerHTML = '<p class="text-muted">Could not load trending repos</p>';
   }
 }
 

@@ -310,3 +310,132 @@ export async function fetchFileContent(
 
   return response.text();
 }
+
+// Trending repos types
+export interface TrendingRepo {
+  fullName: string;
+  description: string | null;
+  stars: number;
+  language: string | null;
+  url: string;
+}
+
+const TRENDING_CACHE_KEY = 'repox_trending';
+const TRENDING_CACHE_DURATION = 1 * 60 * 60 * 1000; // 1 hour
+
+// OSS Insight API response type
+interface OSSInsightResponse {
+  data: {
+    rows: Array<{
+      repo_name: string;
+      description: string | null;
+      stars: string;
+      primary_language: string | null;
+    }>;
+  };
+}
+
+/**
+ * Fetch trending repositories from OSS Insight API (cached)
+ */
+export async function fetchTrendingRepos(): Promise<TrendingRepo[]> {
+  // Check cache first
+  try {
+    const cached = localStorage.getItem(TRENDING_CACHE_KEY);
+    if (cached) {
+      const { repos, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < TRENDING_CACHE_DURATION) {
+        return repos;
+      }
+    }
+  } catch {
+    // Ignore cache errors
+  }
+
+  // Fetch from OSS Insight API - actual trending repos
+  const response = await fetch(
+    'https://api.ossinsight.io/v1/trends/repos?period=past_week&per_page=3'
+  );
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch trending repos');
+  }
+  
+  const data: OSSInsightResponse = await response.json();
+
+  const repos: TrendingRepo[] = data.data.rows.slice(0, 3).map(item => ({
+    fullName: item.repo_name,
+    description: item.description,
+    stars: parseInt(item.stars) || 0,
+    language: item.primary_language,
+    url: `https://github.com/${item.repo_name}`,
+  }));
+
+  // Cache the result
+  try {
+    localStorage.setItem(TRENDING_CACHE_KEY, JSON.stringify({
+      repos,
+      timestamp: Date.now(),
+    }));
+  } catch {
+    // Ignore storage errors
+  }
+
+  return repos;
+}
+
+// Saved repo history
+export interface SavedRepo {
+  fullName: string;
+  description: string | null;
+  stars: number;
+  language: string | null;
+  url: string;
+  savedAt: number;
+}
+
+const HISTORY_KEY = 'repox_history';
+const MAX_HISTORY = 10;
+
+/**
+ * Get saved repo history
+ */
+export function getRepoHistory(): SavedRepo[] {
+  try {
+    const saved = localStorage.getItem(HISTORY_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save repo to history
+ */
+export function saveRepoToHistory(repo: RepoInfo): void {
+  try {
+    const history = getRepoHistory();
+    
+    // Remove if already exists
+    const filtered = history.filter(r => r.fullName !== repo.fullName);
+    
+    // Add to front
+    const newEntry: SavedRepo = {
+      fullName: repo.fullName,
+      description: repo.description,
+      stars: repo.stars,
+      language: repo.language,
+      url: repo.url,
+      savedAt: Date.now(),
+    };
+    
+    filtered.unshift(newEntry);
+    
+    // Keep only MAX_HISTORY items
+    const trimmed = filtered.slice(0, MAX_HISTORY);
+    
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage errors
+  }
+}
