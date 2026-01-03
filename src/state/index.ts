@@ -38,9 +38,11 @@ export function subscribe(listener: AppStateListener): () => void {
 /**
  * Update state and notify subscribers
  */
-export function setState(updates: Partial<AppState>): void {
+export function setState(updates: Partial<AppState>, silent = false): void {
   state = { ...state, ...updates };
-  listeners.forEach((listener) => listener(state));
+  if (!silent) {
+    listeners.forEach((listener) => listener(state));
+  }
 }
 
 /**
@@ -60,8 +62,9 @@ export function setError(error: string): void {
   setState({ loading: false, error });
 }
 
-export function setRepoUrl(repoUrl: string): void {
-  setState({ repoUrl, error: null });
+export function setRepoUrl(repoUrl: string, silent = true): void {
+  // Default silent to prevent re-render on every keystroke
+  setState({ repoUrl, error: null }, silent);
 }
 
 export function setRepoData(info: RepoInfo, tree: FileNode): void {
@@ -74,8 +77,8 @@ export function setRepoData(info: RepoInfo, tree: FileNode): void {
   });
 }
 
-export function selectFile(file: FileNode | null): void {
-  setState({ selectedFile: file });
+export function selectFile(file: FileNode | null, silent = false): void {
+  setState({ selectedFile: file }, silent);
 }
 
 export function goToLanding(): void {

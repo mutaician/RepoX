@@ -2,7 +2,6 @@
 import './style.css';
 import {
   getState,
-  setState,
   subscribe,
   setLoading,
   setError,
@@ -20,6 +19,9 @@ import {
   renderFileTree,
   attachFileTreeListeners,
   getFileTreeStyles,
+  initializeGraph,
+  getGraphStyles,
+  cleanupGraph,
 } from './components';
 
 // ASCII Art for the landing page
@@ -161,19 +163,60 @@ function renderRepoView(): string {
   const state = getState();
   if (!state.fileTree) return '';
   
+  // Get current tab from localStorage or default to 'tree'
+  const currentTab = localStorage.getItem('repox_view_tab') || 'tree';
+  
   return `
-    <div class="repo-view">
+    <div class="repo-view ${currentTab === 'graph' ? 'graph-mode' : ''}">
       <aside class="sidebar">
         <div class="sidebar-header">
           ${renderRepoInfo()}
+        </div>
+        <div class="sidebar-tabs">
+          <button class="tab-btn ${currentTab === 'tree' ? 'active' : ''}" data-tab="tree">
+            📁 Tree
+          </button>
+          <button class="tab-btn ${currentTab === 'graph' ? 'active' : ''}" data-tab="graph">
+            🔗 Graph
+          </button>
         </div>
         <div class="sidebar-content">
           ${renderFileTree(state.fileTree)}
         </div>
       </aside>
       <main class="content-area">
-        ${state.selectedFile ? renderFilePanel() : renderWelcomePanel()}
+        ${currentTab === 'graph' 
+          ? renderGraphPanel() 
+          : (state.selectedFile ? renderFilePanel() : renderWelcomePanel())
+        }
       </main>
+    </div>
+  `;
+}
+
+/**
+ * Render full-size graph panel
+ */
+function renderGraphPanel(): string {
+  return `
+    <div class="graph-panel">
+      <div class="graph-panel-header">
+        <h3>Repository Architecture</h3>
+        <div class="graph-controls-inline">
+          <button class="btn btn-ghost btn-sm" id="zoom-in-btn">+</button>
+          <button class="btn btn-ghost btn-sm" id="zoom-out-btn">−</button>
+          <button class="btn btn-ghost btn-sm" id="zoom-reset-btn">Reset</button>
+        </div>
+      </div>
+      <div class="graph-full-container" id="graph-container"></div>
+      <div class="graph-legend-inline">
+        <span class="legend-item"><span class="legend-dot" style="background: #00d4aa"></span> Folder</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #3178c6"></span> TypeScript</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #f7df1e"></span> JavaScript</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #e34c26"></span> HTML</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #1572b6"></span> CSS</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #cbcb41"></span> JSON</span>
+      </div>
     </div>
   `;
 }
@@ -260,7 +303,7 @@ function render(): void {
     styleEl.id = styleId;
     document.head.appendChild(styleEl);
   }
-  styleEl.textContent = getFileTreeStyles() + getRepoViewStyles();
+  styleEl.textContent = getFileTreeStyles() + getGraphStyles() + getRepoViewStyles();
 
   app.innerHTML = `
     ${renderHeader()}
@@ -320,9 +363,44 @@ function getRepoViewStyles(): string {
       border-bottom: 1px solid var(--color-border);
     }
     
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--color-border);
+    }
+    
+    .tab-btn {
+      flex: 1;
+      padding: var(--space-3);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--color-text-muted);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    
+    .tab-btn:hover {
+      background: var(--color-surface-hover);
+      color: var(--color-text);
+    }
+    
+    .tab-btn.active {
+      color: var(--color-accent-primary);
+      border-bottom-color: var(--color-accent-primary);
+    }
+    
     .sidebar-content {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
+    }
+    
+    .sidebar-graph {
+      width: 100%;
+      height: 100%;
+      min-height: 300px;
     }
     
     .repo-info-bar {
@@ -434,6 +512,97 @@ function getRepoViewStyles(): string {
       white-space: pre-wrap;
     }
     
+    /* Graph Panel Styles */
+    .graph-panel {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .graph-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--space-4);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+    }
+    
+    .graph-panel-header h3 {
+      margin: 0;
+    }
+    
+    .graph-controls-inline {
+      display: flex;
+      gap: var(--space-2);
+    }
+    
+    .btn-sm {
+      padding: var(--space-2) var(--space-3);
+      font-size: var(--text-xs);
+    }
+    
+    .graph-full-container {
+      flex: 1;
+      min-height: 400px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    
+    .graph-legend-inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-4);
+      padding: var(--space-3) 0;
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1);
+    }
+    
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    
+    .graph-file-info {
+      display: none;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-accent-primary);
+      color: var(--color-bg);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      margin-top: var(--space-2);
+    }
+    
+    .file-info-icon {
+      font-size: var(--text-lg);
+    }
+    
+    .file-info-name {
+      font-weight: 600;
+    }
+    
+    .file-info-path {
+      opacity: 0.8;
+      font-size: var(--text-xs);
+    }
+    
+    .file-info-size {
+      margin-left: auto;
+      opacity: 0.8;
+    }
+    
     @media (max-width: 768px) {
       .repo-view {
         grid-template-columns: 1fr;
@@ -477,11 +646,38 @@ function attachEventListeners(): void {
     }
   } else {
     // Repo view listeners
+    const currentTab = localStorage.getItem('repox_view_tab') || 'tree';
+    
+    // Always attach file tree listeners (sidebar is always visible)
     attachFileTreeListeners();
+    
+    if (currentTab === 'graph') {
+      // Initialize graph in main content area
+      const graphContainer = document.getElementById('graph-container');
+      const fileTree = getState().fileTree;
+      if (graphContainer && fileTree) {
+        initializeGraph(fileTree, graphContainer);
+      }
+    }
+    
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const tab = (e.target as HTMLElement).dataset.tab;
+        if (tab) {
+          cleanupGraph();
+          localStorage.setItem('repox_view_tab', tab);
+          render();
+        }
+      });
+    });
     
     const backBtn = document.getElementById('back-to-home');
     if (backBtn) {
-      backBtn.addEventListener('click', goToLanding);
+      backBtn.addEventListener('click', () => {
+        cleanupGraph();
+        goToLanding();
+      });
     }
     
     const viewRawBtn = document.getElementById('view-raw-btn');
@@ -552,6 +748,36 @@ subscribe(() => render());
 
 // Listen for custom re-render events (from file tree)
 window.addEventListener('repox:rerender', () => render());
+
+// Listen for file selection from graph (update info without full re-render)
+window.addEventListener('repox:fileselected', ((e: CustomEvent) => {
+  const file = e.detail.file;
+  if (!file) return;
+  
+  // Create or update a floating file info bar
+  let infoBar = document.getElementById('graph-file-info');
+  if (!infoBar) {
+    infoBar = document.createElement('div');
+    infoBar.id = 'graph-file-info';
+    infoBar.className = 'graph-file-info';
+    document.querySelector('.graph-panel')?.appendChild(infoBar);
+  }
+  
+  infoBar.innerHTML = `
+    <span class="file-info-icon">📄</span>
+    <span class="file-info-name">${file.name}</span>
+    <span class="file-info-path">${file.path}</span>
+    ${file.size ? `<span class="file-info-size">${formatFileSize(file.size)}</span>` : ''}
+  `;
+  infoBar.style.display = 'flex';
+}) as EventListener);
+
+// Helper for file size formatting
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 // Initialize
 render();
