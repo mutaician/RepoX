@@ -1,0 +1,6 @@
+name = "repox-gemini-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+# GEMINI_API_KEY will be set via `wrangler secret put GEMINI_API_KEY`

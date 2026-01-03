@@ -251,6 +251,8 @@ function renderFilePanel(): string {
   const file = getState().selectedFile;
   if (!file) return '';
   
+  const eli5Enabled = localStorage.getItem('repox_eli5') === 'true';
+  
   return `
     <div class="file-panel">
       <div class="file-panel-header">
@@ -262,15 +264,19 @@ function renderFilePanel(): string {
       </div>
       <div class="file-panel-content">
         <div class="file-actions">
-          <button class="btn btn-primary" id="explain-btn" disabled>
-            Explain This File (Coming in Step 4)
+          <button class="btn btn-primary" id="explain-btn">
+            Explain with AI
           </button>
           <button class="btn btn-ghost" id="view-raw-btn">
             View Raw
           </button>
+          <label class="eli5-toggle">
+            <input type="checkbox" id="eli5-checkbox" ${eli5Enabled ? 'checked' : ''}>
+            <span>ELI5 Mode</span>
+          </label>
         </div>
         <div class="file-preview" id="file-preview">
-          <p class="text-muted">Click "View Raw" to see file contents, or wait for Step 4 for AI explanations.</p>
+          <p class="text-muted">Click "Explain with AI" for an AI-powered explanation, or "View Raw" to see file contents.</p>
         </div>
       </div>
     </div>
@@ -512,6 +518,64 @@ function getRepoViewStyles(): string {
       white-space: pre-wrap;
     }
     
+    .eli5-toggle {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+      cursor: pointer;
+      margin-left: auto;
+    }
+    
+    .eli5-toggle input {
+      accent-color: var(--color-accent-primary);
+    }
+    
+    .ai-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      text-align: center;
+    }
+    
+    .ai-explanation {
+      line-height: 1.6;
+    }
+    
+    .ai-explanation h2, .ai-explanation h3, .ai-explanation h4 {
+      margin-top: var(--space-4);
+      margin-bottom: var(--space-2);
+      color: var(--color-accent-primary);
+    }
+    
+    .ai-explanation code {
+      background: var(--color-bg);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+    }
+    
+    .ai-explanation pre {
+      background: var(--color-bg);
+      padding: var(--space-3);
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+    }
+    
+    .ai-explanation ul, .ai-explanation ol {
+      margin: var(--space-2) 0;
+      padding-left: var(--space-5);
+    }
+    
+    .ai-error {
+      padding: var(--space-4);
+      background: rgba(255, 107, 53, 0.1);
+      border: 1px solid var(--color-accent-secondary);
+      border-radius: var(--radius-md);
+    }
+    
     /* Graph Panel Styles */
     .graph-panel {
       height: 100%;
@@ -684,6 +748,18 @@ function attachEventListeners(): void {
     if (viewRawBtn) {
       viewRawBtn.addEventListener('click', handleViewRaw);
     }
+    
+    const explainBtn = document.getElementById('explain-btn');
+    if (explainBtn) {
+      explainBtn.addEventListener('click', handleExplain);
+    }
+    
+    const eli5Checkbox = document.getElementById('eli5-checkbox') as HTMLInputElement;
+    if (eli5Checkbox) {
+      eli5Checkbox.addEventListener('change', () => {
+        localStorage.setItem('repox_eli5', eli5Checkbox.checked.toString());
+      });
+    }
   }
 }
 
@@ -741,6 +817,97 @@ async function handleViewRaw(): Promise<void> {
   } catch (err) {
     preview.innerHTML = `<span class="error-message">Failed to load file: ${err instanceof Error ? err.message : 'Unknown error'}</span>`;
   }
+}
+
+/**
+ * Handle explain button - calls Gemini AI
+ */
+async function handleExplain(): Promise<void> {
+  const state = getState();
+  const file = state.selectedFile;
+  const repo = state.currentRepo;
+  
+  if (!file || !repo) return;
+  
+  const preview = document.getElementById('file-preview');
+  const explainBtn = document.getElementById('explain-btn') as HTMLButtonElement;
+  if (!preview) return;
+  
+  // Show loading state
+  preview.innerHTML = `
+    <div class="ai-loading">
+      <div class="spinner"></div>
+      <p>Analyzing file with AI...</p>
+      <p class="text-muted">This may take a few seconds</p>
+    </div>
+  `;
+  if (explainBtn) explainBtn.disabled = true;
+  
+  try {
+    // First fetch the file content
+    const { fetchFileContent, explainFile } = await import('./services');
+    const content = await fetchFileContent(repo.owner, repo.repo, file.path);
+    
+    // Check ELI5 mode
+    const eli5Enabled = localStorage.getItem('repox_eli5') === 'true';
+    
+    // Then call Gemini API
+    const explanation = await explainFile({
+      fileName: file.name,
+      filePath: file.path,
+      fileContent: content,
+      repoContext: `Repository: ${repo.fullName}${repo.description ? ` - ${repo.description}` : ''}`,
+      eli5: eli5Enabled,
+    });
+    
+    // Render markdown (simple conversion)
+    preview.innerHTML = `
+      <div class="ai-explanation">
+        ${renderMarkdown(explanation)}
+      </div>
+    `;
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    preview.innerHTML = `
+      <div class="ai-error">
+        <p><strong>Failed to get AI explanation</strong></p>
+        <p class="text-muted">${errorMessage}</p>
+        <p class="text-muted">Make sure the Cloudflare Worker is running: <code>cd worker && bun run dev</code></p>
+      </div>
+    `;
+  } finally {
+    if (explainBtn) explainBtn.disabled = false;
+  }
+}
+
+/**
+ * Simple markdown to HTML converter
+ */
+function renderMarkdown(text: string): string {
+  return text
+    // Headers
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Code blocks
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    // Lists
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    // Numbered lists
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Paragraphs
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^(.+)$/gm, (match) => {
+      if (match.startsWith('<')) return match;
+      return match;
+    });
 }
 
 // Subscribe to state changes

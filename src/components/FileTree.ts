@@ -89,7 +89,7 @@ export function toggleFolder(path: string): void {
  * Render a single tree node
  */
 function renderNode(node: FileNode, depth = 0): string {
-  const indent = depth * 16;
+  const indent = (depth * 16) + 12;
   const isExpanded = expandedFolders.has(node.path);
   const isSelected = getState().selectedFile?.path === node.path;
   const icon = getFileIcon(node, isExpanded);
