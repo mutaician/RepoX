@@ -32,7 +32,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/repox.git
+git clone https://github.com/mutaician/repox.git
 cd repox
 
 # Install dependencies
