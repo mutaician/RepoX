@@ -301,7 +301,6 @@ function renderWelcomePanel(): string {
   
   return `
     <div class="welcome-panel">
-      <div class="welcome-icon">📂</div>
       <h2>Ready to Learn ${repo?.repo || 'This Repo'}</h2>
       <p class="text-muted">
         This repository contains ${fileCount} files. 
@@ -313,6 +312,17 @@ function renderWelcomePanel(): string {
         </button>
       </div>
       <div id="learning-path-container"></div>
+      
+      <div class="getting-started">
+        <h4>How to use RepoX</h4>
+        <ol class="getting-started-list">
+          <li><strong>Browse files</strong> — Use the tree and graph view on the left to explore the repository structure</li>
+          <li><strong>Generate a learning path</strong> — Click the button above to get an AI-curated learning journey</li>
+          <li><strong>Get explanations</strong> — Click any file, then "Explain with AI" to understand what it does</li>
+          <li><strong>Take quizzes</strong> — Complete learning modules to test your knowledge and earn XP</li>
+          <li><strong>Ask questions</strong> — Click the "?" button to chat with AI about this codebase</li>
+        </ol>
+      </div>
     </div>
   `;
 }
