@@ -37,6 +37,8 @@ export default {
         return await handleExplain(request, env);
       } else if (path === '/api/learning-path') {
         return await handleLearningPath(request, env);
+      } else if (path === '/api/challenge') {
+        return await handleChallenge(request, env);
       } else if (path === '/api/chat') {
         return await handleChat(request, env);
       } else {
@@ -173,6 +175,87 @@ Format as JSON with this structure:
 }
 
 /**
+ * Handle challenge generation for a learning module
+ * Uses structured output for reliable JSON parsing
+ */
+async function handleChallenge(request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as {
+    moduleTitle: string;
+    moduleDescription: string;
+    objectives: string[];
+    files: string[];
+    repoName: string;
+  };
+
+  if (!body.moduleTitle) {
+    return jsonResponse({ error: 'moduleTitle required' }, 400);
+  }
+
+  const prompt = `Generate 4 quiz questions to test understanding of a learning module.
+
+Module: ${body.moduleTitle}
+Description: ${body.moduleDescription || 'No description'}
+Repository: ${body.repoName || 'Unknown'}
+
+Learning Objectives:
+${body.objectives?.map(o => `- ${o}`).join('\n') || '- Understand the module content'}
+
+Files Covered:
+${body.files?.map(f => `- ${f}`).join('\n') || '- Various files'}
+
+Create 4 questions:
+- 2 multiple choice questions (4 options each, format: "A) answer", "B) answer", etc.)
+- 1 true/false question
+- 1 conceptual question about what a code pattern does
+
+Important: Do NOT include actual code blocks in questions. Describe code patterns in plain text.
+Make questions educational and focused on understanding concepts.`;
+
+  // JSON Schema for structured output
+  const challengeSchema = {
+    type: "object",
+    properties: {
+      challenges: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Unique identifier like q1, q2, etc." },
+            type: { 
+              type: "string", 
+              enum: ["multiple_choice", "true_false", "code_output"],
+              description: "Type of question"
+            },
+            question: { type: "string", description: "The question text" },
+            options: { 
+              type: "array", 
+              items: { type: "string" },
+              description: "Answer options"
+            },
+            correctAnswer: { type: "string", description: "The correct answer, must match one option exactly" },
+            explanation: { type: "string", description: "Brief explanation of why this is correct" },
+            points: { type: "integer", description: "Points for correct answer (20-30)" }
+          },
+          required: ["id", "type", "question", "options", "correctAnswer", "explanation", "points"]
+        }
+      }
+    },
+    required: ["challenges"]
+  };
+
+  try {
+    const result = await callGeminiStructured(env.GEMINI_API_KEY, prompt, challengeSchema);
+    return jsonResponse({ challenges: result.challenges || [] });
+  } catch (error) {
+    console.error('Challenge generation error:', error);
+    return jsonResponse({ 
+      challenges: [],
+      error: error instanceof Error ? error.message : 'Failed to generate challenges' 
+    }, 500);
+  }
+}
+
+/**
  * Handle chat/follow-up questions
  */
 async function handleChat(request: Request, env: Env): Promise<Response> {
@@ -254,6 +337,62 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
   }
 
   return text;
+}
+
+/**
+ * Call Gemini API with structured output (JSON schema)
+ * This ensures clean JSON responses without markdown formatting
+ */
+async function callGeminiStructured(
+  apiKey: string, 
+  prompt: string, 
+  schema: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const response = await fetch(
+    `${GEMINI_API_BASE}/models/gemini-2.0-flash:generateContent`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4096,
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('Gemini API error:', error);
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json() as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+  };
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('No response from Gemini');
+  }
+
+  // Parse the JSON response
+  return JSON.parse(text);
 }
 
 /**

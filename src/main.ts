@@ -10,6 +10,11 @@ import {
   setRepoData,
   goToLanding,
   selectFile,
+  getUserProgress,
+  addXP,
+  completeChallengeSet,
+  getCachedChallenges,
+  cacheChallenges,
 } from './state';
 import {
   isValidGitHubUrl,
@@ -19,7 +24,9 @@ import {
   getRepoHistory,
   fetchTrendingRepos,
   saveRepoToHistory,
+  generateChallenges,
   type TrendingRepo,
+  type Challenge,
 } from './services';
 import {
   renderFileTree,
@@ -46,6 +53,7 @@ const ASCII_ART = `
 function renderHeader(): string {
   const state = getState();
   const rateLimit = getRateLimitInfo();
+  const progress = getUserProgress();
   const hasLearningPath = state.currentRepo ? getSavedLearningPath(state.currentRepo.fullName) !== null : false;
   
   return `
@@ -56,6 +64,18 @@ function renderHeader(): string {
           <span>RepoX</span>
         </div>
         <div class="header-right">
+          ${progress.totalXP > 0 ? `
+            <div class="xp-display" title="Total XP earned">
+              <span class="xp-icon">⚡</span>
+              <span class="xp-value">${formatNumber(progress.totalXP)} XP</span>
+            </div>
+            ${progress.currentStreak > 0 ? `
+              <div class="streak-display" title="Current streak: ${progress.currentStreak} correct in a row">
+                <span class="streak-icon">🔥</span>
+                <span class="streak-value">${progress.currentStreak}</span>
+              </div>
+            ` : ''}
+          ` : ''}
           <span class="rate-limit ${rateLimit.remaining < 10 ? 'warning' : ''}">
             API: ${rateLimit.remaining}/${rateLimit.limit}
           </span>
@@ -804,8 +824,10 @@ function saveModuleCompletion(repoName: string, moduleIndex: number, completed: 
  */
 function attachLearningPathListeners(repoName: string): void {
   const checkboxes = document.querySelectorAll('.module-checkbox');
+  const savedPath = getSavedLearningPath(repoName);
+  
   checkboxes.forEach((checkbox, i) => {
-    checkbox.addEventListener('change', (e) => {
+    checkbox.addEventListener('change', async (e) => {
       const target = e.target as HTMLInputElement;
       saveModuleCompletion(repoName, i, target.checked);
       
@@ -813,6 +835,12 @@ function attachLearningPathListeners(repoName: string): void {
       const module = target.closest('.learning-module');
       if (module) {
         module.classList.toggle('completed', target.checked);
+      }
+      
+      // If marking as complete, trigger challenge
+      if (target.checked && savedPath?.modules?.[i]) {
+        const moduleData = savedPath.modules[i];
+        await showChallengeModal(repoName, i, moduleData);
       }
     });
   });
@@ -900,6 +928,371 @@ function renderLearningPathUI(path: import('./services').LearningPath, repoName:
       ` : ''}
     </div>
   `;
+}
+
+// ============================================
+// Challenge Modal System
+// ============================================
+// Using direct DOM manipulation to avoid SPA re-render issues
+
+interface ChallengeModalState {
+  challenges: Challenge[];
+  currentIndex: number;
+  results: { correct: boolean; points: number }[];
+  repoName: string;
+  moduleIndex: number;
+}
+
+let challengeModalState: ChallengeModalState | null = null;
+
+/**
+ * Show challenge modal for a completed module
+ */
+async function showChallengeModal(
+  repoName: string, 
+  moduleIndex: number, 
+  moduleData: { title: string; description: string; objectives: string[]; files: string[] }
+): Promise<void> {
+  // Check for cached challenges first
+  let challenges = getCachedChallenges(repoName, moduleIndex);
+  
+  // If no cache, generate new challenges
+  if (!challenges || challenges.length === 0) {
+    // Show loading modal
+    showChallengeLoadingModal();
+    
+    try {
+      const repo = getState().currentRepo;
+      challenges = await generateChallenges({
+        moduleTitle: moduleData.title,
+        moduleDescription: moduleData.description,
+        objectives: moduleData.objectives || [],
+        files: moduleData.files || [],
+        repoName: repo?.fullName || repoName,
+      });
+      
+      if (challenges.length > 0) {
+        cacheChallenges(repoName, moduleIndex, challenges);
+      }
+    } catch (error) {
+      console.error('Failed to generate challenges:', error);
+      hideChallengeModal();
+      return;
+    }
+  }
+  
+  if (!challenges || challenges.length === 0) {
+    hideChallengeModal();
+    return;
+  }
+  
+  // Initialize modal state
+  challengeModalState = {
+    challenges,
+    currentIndex: 0,
+    results: [],
+    repoName,
+    moduleIndex,
+  };
+  
+  renderChallengeQuestion();
+}
+
+/**
+ * Show loading state in modal
+ */
+function showChallengeLoadingModal(): void {
+  let modal = document.getElementById('challenge-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'challenge-modal';
+    modal.className = 'challenge-modal';
+    document.body.appendChild(modal);
+  }
+  
+  modal.innerHTML = `
+    <div class="challenge-modal-content">
+      <div class="challenge-loading">
+        <div class="spinner"></div>
+        <h3>Generating Quiz...</h3>
+        <p class="text-muted">Creating questions based on this module</p>
+      </div>
+    </div>
+  `;
+  modal.style.display = 'flex';
+}
+
+/**
+ * Render current challenge question
+ */
+function renderChallengeQuestion(): void {
+  if (!challengeModalState) return;
+  
+  const { challenges, currentIndex } = challengeModalState;
+  const challenge = challenges[currentIndex];
+  
+  let modal = document.getElementById('challenge-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'challenge-modal';
+    modal.className = 'challenge-modal';
+    document.body.appendChild(modal);
+  }
+  
+  const progressPercent = ((currentIndex) / challenges.length) * 100;
+  
+  modal.innerHTML = `
+    <div class="challenge-modal-content">
+      <div class="challenge-header">
+        <div class="challenge-progress">
+          <div class="challenge-progress-bar" style="width: ${progressPercent}%"></div>
+        </div>
+        <span class="challenge-counter">${currentIndex + 1} / ${challenges.length}</span>
+        <span class="challenge-points">+${challenge.points} XP</span>
+      </div>
+      
+      <div class="challenge-question">
+        <span class="challenge-type">${formatChallengeType(challenge.type)}</span>
+        <h3>${escapeHtml(challenge.question)}</h3>
+      </div>
+      
+      <div class="challenge-options">
+        ${challenge.options.map((option, i) => `
+          <button class="challenge-option" data-index="${i}" data-answer="${escapeHtml(option)}">
+            ${escapeHtml(option)}
+          </button>
+        `).join('')}
+      </div>
+      
+      <button class="btn btn-ghost challenge-skip" id="skip-challenge-btn">
+        Skip This Question
+      </button>
+    </div>
+  `;
+  
+  modal.style.display = 'flex';
+  
+  // Attach option click handlers
+  modal.querySelectorAll('.challenge-option').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const answer = (btn as HTMLElement).dataset.answer || '';
+      handleChallengeAnswer(answer);
+    });
+  });
+  
+  // Skip button
+  document.getElementById('skip-challenge-btn')?.addEventListener('click', () => {
+    handleChallengeAnswer('__SKIP__');
+  });
+}
+
+/**
+ * Handle answer selection
+ */
+function handleChallengeAnswer(selectedAnswer: string): void {
+  if (!challengeModalState) return;
+  
+  const { challenges, currentIndex } = challengeModalState;
+  const challenge = challenges[currentIndex];
+  const isSkip = selectedAnswer === '__SKIP__';
+  const isCorrect = !isSkip && selectedAnswer === challenge.correctAnswer;
+  const earnedPoints = isCorrect ? challenge.points : 0;
+  
+  // Update progress
+  if (!isSkip) {
+    addXP(earnedPoints, isCorrect);
+  }
+  
+  challengeModalState.results.push({ correct: isCorrect, points: earnedPoints });
+  
+  // Show feedback
+  showAnswerFeedback(isCorrect, isSkip, challenge, selectedAnswer);
+}
+
+/**
+ * Show answer feedback
+ */
+function showAnswerFeedback(isCorrect: boolean, isSkip: boolean, challenge: Challenge, _selectedAnswer: string): void {
+  const modal = document.getElementById('challenge-modal');
+  if (!modal || !challengeModalState) return;
+  
+  const { challenges, currentIndex } = challengeModalState;
+  const isLast = currentIndex >= challenges.length - 1;
+  
+  // Show floating XP if correct
+  if (isCorrect) {
+    showFloatingXP(challenge.points);
+  }
+  
+  const feedbackHtml = `
+    <div class="challenge-modal-content">
+      <div class="challenge-feedback ${isSkip ? 'skipped' : isCorrect ? 'correct' : 'incorrect'}">
+        <div class="feedback-icon">${isSkip ? '⏭️' : isCorrect ? '✅' : '❌'}</div>
+        <h3>${isSkip ? 'Skipped' : isCorrect ? 'Correct!' : 'Not Quite'}</h3>
+        ${!isSkip && !isCorrect ? `
+          <p class="correct-answer">Correct answer: <strong>${escapeHtml(challenge.correctAnswer)}</strong></p>
+        ` : ''}
+        <div class="feedback-explanation">
+          <p>${escapeHtml(challenge.explanation)}</p>
+        </div>
+        ${isCorrect ? `<p class="xp-earned">+${challenge.points} XP</p>` : ''}
+      </div>
+      
+      <button class="btn btn-primary" id="next-challenge-btn">
+        ${isLast ? 'See Results' : 'Next Question'}
+      </button>
+    </div>
+  `;
+  
+  modal.innerHTML = feedbackHtml;
+  
+  document.getElementById('next-challenge-btn')?.addEventListener('click', () => {
+    if (isLast) {
+      showChallengeResults();
+    } else {
+      challengeModalState!.currentIndex++;
+      renderChallengeQuestion();
+    }
+  });
+}
+
+/**
+ * Show final results
+ */
+function showChallengeResults(): void {
+  const modal = document.getElementById('challenge-modal');
+  if (!modal || !challengeModalState) return;
+  
+  const { results } = challengeModalState;
+  const totalCorrect = results.filter(r => r.correct).length;
+  const totalPoints = results.reduce((sum, r) => sum + r.points, 0);
+  const accuracy = Math.round((totalCorrect / results.length) * 100);
+  
+  // Mark challenge set as completed
+  completeChallengeSet();
+  
+  const progress = getUserProgress();
+  
+  modal.innerHTML = `
+    <div class="challenge-modal-content">
+      <div class="challenge-results">
+        <div class="results-icon">${accuracy >= 75 ? '🏆' : accuracy >= 50 ? '👍' : '📚'}</div>
+        <h2>Module Complete!</h2>
+        
+        <div class="results-stats">
+          <div class="result-stat">
+            <span class="stat-value">${totalCorrect}/${results.length}</span>
+            <span class="stat-label">Correct</span>
+          </div>
+          <div class="result-stat">
+            <span class="stat-value">${accuracy}%</span>
+            <span class="stat-label">Accuracy</span>
+          </div>
+          <div class="result-stat highlight">
+            <span class="stat-value">+${totalPoints}</span>
+            <span class="stat-label">XP Earned</span>
+          </div>
+        </div>
+        
+        <div class="results-progress">
+          <p class="text-muted">Total XP: ${formatNumber(progress.totalXP)}</p>
+          ${progress.currentStreak > 1 ? `<p class="streak-bonus">🔥 ${progress.currentStreak} answer streak!</p>` : ''}
+        </div>
+      </div>
+      
+      <button class="btn btn-primary" id="close-challenge-btn">
+        Continue Learning
+      </button>
+    </div>
+  `;
+  
+  document.getElementById('close-challenge-btn')?.addEventListener('click', () => {
+    hideChallengeModal();
+    // Re-render header to update XP display
+    const header = document.querySelector('.header');
+    if (header) {
+      header.outerHTML = renderHeader();
+      attachHeaderListeners();
+    }
+  });
+}
+
+/**
+ * Attach header-specific listeners after updating header
+ */
+function attachHeaderListeners(): void {
+  const state = getState();
+  
+  const backBtn = document.getElementById('back-to-home');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      cleanupGraph();
+      goToLanding();
+    });
+  }
+  
+  const showPathBtn = document.getElementById('show-learning-path-btn');
+  if (showPathBtn && state.currentRepo) {
+    showPathBtn.addEventListener('click', () => {
+      selectFile(null, true);
+      render();
+      setTimeout(() => {
+        handleGenerateLearningPath();
+      }, 50);
+    });
+  }
+}
+
+/**
+ * Show floating +XP animation
+ */
+function showFloatingXP(points: number): void {
+  const popup = document.createElement('div');
+  popup.className = 'xp-popup';
+  popup.textContent = `+${points} XP`;
+  document.body.appendChild(popup);
+  
+  // Trigger animation
+  requestAnimationFrame(() => {
+    popup.classList.add('animate');
+  });
+  
+  // Remove after animation
+  setTimeout(() => {
+    popup.remove();
+  }, 1500);
+}
+
+/**
+ * Hide challenge modal
+ */
+function hideChallengeModal(): void {
+  const modal = document.getElementById('challenge-modal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+  challengeModalState = null;
+}
+
+/**
+ * Format challenge type for display
+ */
+function formatChallengeType(type: string): string {
+  switch (type) {
+    case 'multiple_choice': return 'Multiple Choice';
+    case 'true_false': return 'True or False';
+    case 'code_output': return 'Code Output';
+    default: return 'Question';
+  }
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Subscribe to state changes

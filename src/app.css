@@ -629,3 +629,387 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* ============================================
+   Gamification Styles
+   ============================================ */
+
+/* XP Display in Header */
+.xp-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  background: linear-gradient(135deg, rgba(0, 212, 170, 0.2) 0%, rgba(0, 212, 170, 0.05) 100%);
+  border: 1px solid var(--color-accent-primary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent-primary);
+  box-shadow: 0 0 12px rgba(0, 212, 170, 0.3);
+  animation: xp-glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes xp-glow {
+  from { box-shadow: 0 0 8px rgba(0, 212, 170, 0.2); }
+  to { box-shadow: 0 0 16px rgba(0, 212, 170, 0.4); }
+}
+
+.xp-icon {
+  font-size: var(--text-base);
+}
+
+.xp-value {
+  font-weight: 700;
+}
+
+/* Streak Display */
+.streak-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(255, 107, 53, 0.05) 100%);
+  border: 1px solid var(--color-accent-secondary);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent-secondary);
+  animation: streak-pulse 1s ease-in-out infinite;
+}
+
+@keyframes streak-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.streak-icon {
+  font-size: var(--text-base);
+}
+
+.streak-value {
+  font-weight: 700;
+}
+
+/* Challenge Modal */
+.challenge-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(13, 17, 23, 0.95);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+  animation: modal-fade-in 0.2s ease-out;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.challenge-modal-content {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-6);
+  animation: modal-slide-up 0.3s ease-out;
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Challenge Header */
+.challenge-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.challenge-progress {
+  flex: 1;
+  height: 6px;
+  background: var(--color-bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.challenge-progress-bar {
+  height: 100%;
+  background: var(--color-accent-primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.challenge-counter {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.challenge-points {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent-primary);
+  font-weight: 700;
+}
+
+/* Challenge Question */
+.challenge-question {
+  margin-bottom: var(--space-5);
+}
+
+.challenge-type {
+  display: inline-block;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2);
+}
+
+.challenge-question h3 {
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Challenge Options */
+.challenge-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.challenge-option {
+  background: var(--color-bg);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.challenge-option:hover {
+  border-color: var(--color-accent-primary);
+  background: rgba(0, 212, 170, 0.05);
+  transform: translateX(4px);
+}
+
+.challenge-option:active {
+  transform: translateX(4px) scale(0.98);
+}
+
+.challenge-skip {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+/* Challenge Loading */
+.challenge-loading {
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.challenge-loading h3 {
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+/* Challenge Feedback */
+.challenge-feedback {
+  text-align: center;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+}
+
+.challenge-feedback.correct {
+  background: rgba(0, 212, 170, 0.1);
+  border: 1px solid var(--color-accent-primary);
+}
+
+.challenge-feedback.incorrect {
+  background: rgba(255, 107, 53, 0.1);
+  border: 1px solid var(--color-accent-secondary);
+}
+
+.challenge-feedback.skipped {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.feedback-icon {
+  font-size: 3rem;
+  margin-bottom: var(--space-2);
+}
+
+.challenge-feedback h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.correct-answer {
+  color: var(--color-accent-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.feedback-explanation {
+  text-align: left;
+  background: var(--color-bg);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.xp-earned {
+  color: var(--color-accent-primary);
+  font-weight: 700;
+  font-size: var(--text-lg);
+  margin-top: var(--space-3);
+}
+
+/* Challenge Results */
+.challenge-results {
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.results-icon {
+  font-size: 4rem;
+  margin-bottom: var(--space-3);
+}
+
+.challenge-results h2 {
+  margin: 0 0 var(--space-4);
+  color: var(--color-accent-primary);
+}
+
+.results-stats {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.result-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  min-width: 80px;
+}
+
+.result-stat.highlight {
+  background: linear-gradient(135deg, rgba(0, 212, 170, 0.2) 0%, rgba(0, 212, 170, 0.05) 100%);
+  border: 1px solid var(--color-accent-primary);
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.result-stat.highlight .stat-value {
+  color: var(--color-accent-primary);
+}
+
+.stat-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.results-progress {
+  margin-top: var(--space-4);
+}
+
+.streak-bonus {
+  color: var(--color-accent-secondary);
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+/* Floating XP Popup */
+.xp-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, var(--color-accent-primary) 0%, #00a88a 100%);
+  color: var(--color-bg);
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 700;
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-lg);
+  z-index: 1100;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 0 40px rgba(0, 212, 170, 0.5);
+}
+
+.xp-popup.animate {
+  animation: xp-float-up 1.5s ease-out forwards;
+}
+
+@keyframes xp-float-up {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -150%) scale(0.8);
+  }
+}
+
+/* Responsive adjustments for modal */
+@media (max-width: 480px) {
+  .challenge-modal-content {
+    padding: var(--space-4);
+    margin: var(--space-2);
+  }
+  
+  .results-stats {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  
+  .result-stat {
+    flex: 1;
+    min-width: 70px;
+  }
+}
+

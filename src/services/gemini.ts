@@ -2,7 +2,8 @@
 // Communicates with Cloudflare Worker for AI explanations
 
 // Default to localhost for dev, can be overridden
-const API_BASE = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
+// const API_BASE = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
+const API_BASE = 'http://localhost:8787';
 
 export interface ExplainRequest {
   fileName: string;
@@ -138,3 +139,43 @@ export async function checkHealth(): Promise<boolean> {
 export function getApiBase(): string {
   return API_BASE;
 }
+
+// Challenge generation
+
+export interface ChallengeRequest {
+  moduleTitle: string;
+  moduleDescription: string;
+  objectives: string[];
+  files: string[];
+  repoName: string;
+}
+
+export interface Challenge {
+  id: string;
+  type: 'multiple_choice' | 'true_false' | 'code_output';
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
+  points: number;
+}
+
+/**
+ * Generate challenges for a learning module
+ */
+export async function generateChallenges(request: ChallengeRequest): Promise<Challenge[]> {
+  const response = await fetch(`${API_BASE}/api/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error((error as { error?: string }).error || `API error: ${response.status}`);
+  }
+
+  const data = await response.json() as { challenges: Challenge[] };
+  return data.challenges || [];
+}
+
