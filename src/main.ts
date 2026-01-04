@@ -25,8 +25,10 @@ import {
   fetchTrendingRepos,
   saveRepoToHistory,
   generateChallenges,
+  chat,
   type TrendingRepo,
   type Challenge,
+  type ChatMessage,
 } from './services';
 import {
   renderFileTree,
@@ -393,6 +395,7 @@ function render(): void {
   `;
 
   attachEventListeners();
+  initializeChatButton();
 }
 
 /**
@@ -469,6 +472,7 @@ function attachEventListeners(): void {
     if (backBtn) {
       backBtn.addEventListener('click', () => {
         cleanupGraph();
+        clearChatHistory();
         goToLanding();
       });
     }
@@ -1293,6 +1297,229 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ============================================
+// Chat Sidebar System
+// ============================================
+
+interface ChatState {
+  isOpen: boolean;
+  messages: ChatMessage[];
+  isLoading: boolean;
+}
+
+const chatState: ChatState = {
+  isOpen: false,
+  messages: [],
+  isLoading: false,
+};
+
+/**
+ * Initialize chat button (called after render)
+ */
+function initializeChatButton(): void {
+  const state = getState();
+  if (state.view !== 'repo') return;
+  
+  // Remove existing button if any
+  const existing = document.getElementById('chat-fab');
+  if (existing) existing.remove();
+  
+  // Create floating action button
+  const fab = document.createElement('button');
+  fab.id = 'chat-fab';
+  fab.className = 'chat-fab';
+  fab.innerHTML = `<span class="chat-fab-icon">?</span>`;
+  fab.title = 'Ask AI about this repository';
+  fab.addEventListener('click', toggleChatSidebar);
+  document.body.appendChild(fab);
+}
+
+/**
+ * Toggle chat sidebar open/closed
+ */
+function toggleChatSidebar(): void {
+  chatState.isOpen = !chatState.isOpen;
+  
+  if (chatState.isOpen) {
+    renderChatSidebar();
+  } else {
+    hideChatSidebar();
+  }
+}
+
+/**
+ * Render the chat sidebar
+ */
+function renderChatSidebar(): void {
+  let sidebar = document.getElementById('chat-sidebar');
+  if (!sidebar) {
+    sidebar = document.createElement('div');
+    sidebar.id = 'chat-sidebar';
+    sidebar.className = 'chat-sidebar';
+    document.body.appendChild(sidebar);
+  }
+  
+  const repo = getState().currentRepo;
+  
+  sidebar.innerHTML = `
+    <div class="chat-header">
+      <h3>Ask about ${repo?.repo || 'this repo'}</h3>
+      <button class="chat-close-btn" id="close-chat-btn">&times;</button>
+    </div>
+    
+    <div class="chat-messages" id="chat-messages">
+      ${chatState.messages.length === 0 ? `
+        <div class="chat-welcome">
+          <p>Ask questions about the repository structure, code patterns, or how things work.</p>
+          <div class="chat-suggestions">
+            <button class="chat-suggestion" data-msg="What is the main purpose of this repository?">
+              What is this repo about?
+            </button>
+            <button class="chat-suggestion" data-msg="Explain the folder structure and architecture">
+              Explain the architecture
+            </button>
+            <button class="chat-suggestion" data-msg="What are the main entry points?">
+              Main entry points?
+            </button>
+          </div>
+        </div>
+      ` : chatState.messages.map(msg => `
+        <div class="chat-message ${msg.role}">
+          <div class="chat-message-content">
+            ${msg.role === 'assistant' ? renderMarkdown(msg.content) : escapeHtml(msg.content)}
+          </div>
+        </div>
+      `).join('')}
+      ${chatState.isLoading ? `
+        <div class="chat-message assistant loading">
+          <div class="chat-typing">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+    
+    <div class="chat-input-area">
+      <input 
+        type="text" 
+        class="chat-input" 
+        id="chat-input" 
+        placeholder="Ask a question..."
+        ${chatState.isLoading ? 'disabled' : ''}
+      />
+      <button class="chat-send-btn" id="chat-send-btn" ${chatState.isLoading ? 'disabled' : ''}>
+        Send
+      </button>
+    </div>
+  `;
+  
+  sidebar.classList.add('open');
+  
+  // Attach event listeners
+  document.getElementById('close-chat-btn')?.addEventListener('click', toggleChatSidebar);
+  
+  const input = document.getElementById('chat-input') as HTMLInputElement;
+  const sendBtn = document.getElementById('chat-send-btn');
+  
+  input?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !chatState.isLoading) {
+      handleChatSend();
+    }
+  });
+  
+  sendBtn?.addEventListener('click', handleChatSend);
+  
+  // Suggestion buttons
+  document.querySelectorAll('.chat-suggestion').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const msg = (btn as HTMLElement).dataset.msg;
+      if (msg && input) {
+        input.value = msg;
+        handleChatSend();
+      }
+    });
+  });
+  
+  // Scroll to bottom
+  const messagesEl = document.getElementById('chat-messages');
+  if (messagesEl) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  
+  // Focus input
+  input?.focus();
+}
+
+/**
+ * Handle sending a chat message
+ */
+async function handleChatSend(): Promise<void> {
+  const input = document.getElementById('chat-input') as HTMLInputElement;
+  const message = input?.value.trim();
+  
+  if (!message || chatState.isLoading) return;
+  
+  // Add user message
+  chatState.messages.push({ role: 'user', content: message });
+  chatState.isLoading = true;
+  input.value = '';
+  
+  renderChatSidebar();
+  
+  try {
+    const state = getState();
+    const repo = state.currentRepo;
+    
+    // Build context from current state
+    let context = `Repository: ${repo?.fullName || 'Unknown'}`;
+    if (repo?.description) {
+      context += `\nDescription: ${repo.description}`;
+    }
+    if (state.selectedFile) {
+      context += `\nCurrently viewing file: ${state.selectedFile.path}`;
+    }
+    if (state.fileTree) {
+      context += `\nRepository has ${countFiles(state.fileTree)} files`;
+    }
+    
+    const response = await chat({
+      message,
+      context,
+      history: chatState.messages.slice(-10), // Last 10 messages for context
+    });
+    
+    chatState.messages.push({ role: 'assistant', content: response });
+  } catch (error) {
+    chatState.messages.push({ 
+      role: 'assistant', 
+      content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Make sure the worker is running.`
+    });
+  } finally {
+    chatState.isLoading = false;
+    renderChatSidebar();
+  }
+}
+
+/**
+ * Hide the chat sidebar
+ */
+function hideChatSidebar(): void {
+  const sidebar = document.getElementById('chat-sidebar');
+  if (sidebar) {
+    sidebar.classList.remove('open');
+  }
+}
+
+/**
+ * Clear chat history (if needed)
+ */
+function clearChatHistory(): void {
+  chatState.messages = [];
+  if (chatState.isOpen) {
+    renderChatSidebar();
+  }
 }
 
 // Subscribe to state changes
