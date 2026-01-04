@@ -2,8 +2,8 @@
 // Communicates with Cloudflare Worker for AI explanations
 
 // Default to localhost for dev, can be overridden
-// const API_BASE = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
-const API_BASE = 'http://localhost:8787';
+const API_BASE = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
+// const API_BASE = 'http://localhost:8787';
 
 export interface ExplainRequest {
   fileName: string;

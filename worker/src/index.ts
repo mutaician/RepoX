@@ -157,7 +157,7 @@ Format as JSON with this structure:
   ]
 }`;
 
-  const response = await callGemini(env.GEMINI_API_KEY, prompt);
+  const response = await callGemini(env.GEMINI_API_KEY, prompt, "gemini-3-pro-preview");
   
   // Try to parse as JSON
   try {
@@ -294,9 +294,9 @@ Respond helpfully. Use markdown for code and formatting.`;
 /**
  * Call Gemini API using REST endpoint
  */
-async function callGemini(apiKey: string, prompt: string): Promise<string> {
+async function callGemini(apiKey: string, prompt: string, model: string = 'gemini-3-flash-preview'): Promise<string> {
   const response = await fetch(
-    `${GEMINI_API_BASE}/models/gemini-3-flash-preview:generateContent`,
+    `${GEMINI_API_BASE}/models/${model}:generateContent`,
     {
       method: 'POST',
       headers: {
