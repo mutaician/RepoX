@@ -1,8 +1,10 @@
 # RepoX
 
+🏆 **Hacks for Hackers 2026 Winner** - Best AI Application Built with Cloudflare
+
 > Transform any GitHub repository into an interactive learning experience.
 
-**Live Demo:** [https://main.repox.pages.dev](https://main.repox.pages.dev)
+**Live Demo:** [https://main.repox.pages.dev](https://main.repox.pages.dev) | **Devpost:** [https://devpost.com/software/repox](https://devpost.com/software/repox)
 
 ## Features
 
@@ -101,10 +103,6 @@ repox/
 └── package.json
 ```
 
-## License
-
-MIT
-
 ---
 
-Built for **Hacks for Hackers 2026** | Powered by Gemini, Cloudflare
+Built for **[Hacks for Hackers 2026](https://devpost.com/software/repox)** | Winner: Best AI Application Built with Cloudflare
