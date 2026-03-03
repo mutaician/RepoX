@@ -14,6 +14,35 @@ const corsHeaders = {
 
 // Gemini API endpoint
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
+const GEMINI_MAX_RETRIES = 2;
+const GEMINI_REQUEST_TIMEOUT_MS = 90000;
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = 'HttpError';
+  }
+}
+
+class GeminiApiError extends Error {
+  status: number;
+  model: string;
+  rawError?: string;
+
+  constructor(status: number, model: string, rawError?: string) {
+    const parsedMessage = extractGeminiErrorMessage(rawError);
+    super(parsedMessage ? `Gemini API error (${status}): ${parsedMessage}` : `Gemini API error: ${status}`);
+    this.status = status;
+    this.model = model;
+    this.rawError = rawError;
+    this.name = 'GeminiApiError';
+  }
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -46,6 +75,9 @@ export default {
       }
     } catch (error) {
       console.error('Worker error:', error);
+      if (error instanceof HttpError) {
+        return jsonResponse({ error: error.message }, error.status);
+      }
       return jsonResponse(
         { error: error instanceof Error ? error.message : 'Internal error' },
         500
@@ -157,7 +189,7 @@ Format as JSON with this structure:
   ]
 }`;
 
-  const response = await callGemini(env.GEMINI_API_KEY, prompt, "gemini-3-pro-preview");
+  const response = await callGemini(env.GEMINI_API_KEY, prompt, "gemini-3.1-pro-preview");
   
   // Try to parse as JSON
   try {
@@ -295,48 +327,19 @@ Respond helpfully. Use markdown for code and formatting.`;
  * Call Gemini API using REST endpoint
  */
 async function callGemini(apiKey: string, prompt: string, model: string = 'gemini-3-flash-preview'): Promise<string> {
-  const response = await fetch(
-    `${GEMINI_API_BASE}/models/${model}:generateContent`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
+  const requestBody = {
+    contents: [
+      {
+        parts: [{ text: prompt }],
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('Gemini API error:', error);
-    throw new Error(`Gemini API error: ${response.status}`);
-  }
-
-  const data = await response.json() as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 4096,
+    },
   };
 
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('No response from Gemini');
-  }
-
-  return text;
+  return callGeminiWithRetries(apiKey, requestBody, model);
 }
 
 /**
@@ -348,34 +351,112 @@ async function callGeminiStructured(
   prompt: string, 
   schema: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(
-    `${GEMINI_API_BASE}/models/gemini-2.0-flash:generateContent`,
-    {
+  const requestBody = {
+    contents: [
+      {
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 4096,
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  };
+
+  const text = await callGeminiWithRetries(apiKey, requestBody, 'gemini-3-flash-preview');
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new HttpError(502, 'Gemini returned invalid structured JSON. Please retry.');
+  }
+}
+
+async function callGeminiWithRetries(
+  apiKey: string,
+  requestBody: Record<string, unknown>,
+  primaryModel: string
+): Promise<string> {
+  const models = buildModelFallbackChain(primaryModel);
+  let lastRetryableError: GeminiApiError | null = null;
+
+  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    const isLastAttempt = attempt === GEMINI_MAX_RETRIES;
+    const model = pickModelForAttempt(attempt, models);
+
+    try {
+      return await requestGeminiText(apiKey, model, requestBody);
+    } catch (error) {
+      if (!(error instanceof GeminiApiError)) {
+        throw error;
+      }
+
+      const isRetryable = RETRYABLE_STATUS_CODES.has(error.status);
+      if (!isRetryable) {
+        throw new HttpError(
+          mapGeminiStatusToClientStatus(error.status),
+          `Gemini request failed on model ${error.model}: ${extractGeminiErrorMessage(error.rawError) || `HTTP ${error.status}`}`
+        );
+      }
+
+      lastRetryableError = error;
+      if (isLastAttempt) {
+        break;
+      }
+
+      await sleep(backoffDelayMs(attempt));
+    }
+  }
+
+  const lastStatus = lastRetryableError?.status ?? 503;
+  throw new HttpError(
+    503,
+    `Gemini is temporarily unavailable after ${GEMINI_MAX_RETRIES + 1} attempts (including fallback model ${GEMINI_FALLBACK_MODEL}). Last upstream status: ${lastStatus}. Please retry shortly.`
+  );
+}
+
+async function requestGeminiText(
+  apiKey: string,
+  model: string,
+  requestBody: Record<string, unknown>
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new GeminiApiError(
+        504,
+        model,
+        JSON.stringify({
+          error: {
+            message: `Upstream request timed out after ${GEMINI_REQUEST_TIMEOUT_MS}ms`,
           },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-          responseMimeType: 'application/json',
-          responseSchema: schema,
-        },
-      }),
+        })
+      );
     }
-  );
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
-    const error = await response.text();
-    console.error('Gemini API error:', error);
-    throw new Error(`Gemini API error: ${response.status}`);
+    const rawError = await response.text();
+    console.error(`Gemini API error [${model}]:`, rawError);
+    throw new GeminiApiError(response.status, model, rawError);
   }
 
   const data = await response.json() as {
@@ -388,11 +469,61 @@ async function callGeminiStructured(
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
-    throw new Error('No response from Gemini');
+    throw new HttpError(502, `No response text returned by Gemini model ${model}.`);
   }
 
-  // Parse the JSON response
-  return JSON.parse(text);
+  return text;
+}
+
+function buildModelFallbackChain(primaryModel: string): string[] {
+  if (primaryModel === GEMINI_FALLBACK_MODEL) {
+    return [primaryModel];
+  }
+  return [primaryModel, GEMINI_FALLBACK_MODEL];
+}
+
+function pickModelForAttempt(attempt: number, models: string[]): string {
+  if (attempt === 0 || models.length < 2) {
+    return models[0];
+  }
+  return models[1];
+}
+
+function backoffDelayMs(attempt: number): number {
+  const baseDelay = 500 * Math.pow(2, attempt);
+  const jitter = Math.floor(Math.random() * 250);
+  return Math.min(baseDelay + jitter, 3000);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function mapGeminiStatusToClientStatus(status: number): number {
+  if (status === 429 || status === 503) {
+    return 503;
+  }
+  if (status >= 400 && status < 500) {
+    return 502;
+  }
+  return 503;
+}
+
+function extractGeminiErrorMessage(rawError?: string): string | null {
+  if (!rawError) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawError) as {
+      error?: {
+        message?: string;
+      };
+    };
+    return parsed.error?.message || null;
+  } catch {
+    return rawError;
+  }
 }
 
 /**

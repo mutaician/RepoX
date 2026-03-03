@@ -4,6 +4,7 @@
 // Default to localhost for dev, can be overridden
 const API_BASE = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
 // const API_BASE = 'http://localhost:8787';
+const REQUEST_TIMEOUT_MS = 120000;
 
 export interface ExplainRequest {
   fileName: string;
@@ -64,18 +65,7 @@ export interface ChatResponse {
  * Explain a file using Gemini AI
  */
 export async function explainFile(request: ExplainRequest): Promise<string> {
-  const response = await fetch(`${API_BASE}/api/explain`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((error as { error?: string }).error || `API error: ${response.status}`);
-  }
-
-  const data = await response.json() as ExplainResponse;
+  const data = await postJson<ExplainResponse>('/api/explain', request);
   return data.explanation;
 }
 
@@ -83,18 +73,7 @@ export async function explainFile(request: ExplainRequest): Promise<string> {
  * Generate a learning path for a repository
  */
 export async function generateLearningPath(request: LearningPathRequest): Promise<LearningPath> {
-  const response = await fetch(`${API_BASE}/api/learning-path`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((error as { error?: string }).error || `API error: ${response.status}`);
-  }
-
-  const data = await response.json() as { learningPath: LearningPath };
+  const data = await postJson<{ learningPath: LearningPath }>('/api/learning-path', request);
   return data.learningPath;
 }
 
@@ -102,18 +81,7 @@ export async function generateLearningPath(request: LearningPathRequest): Promis
  * Chat with the AI about the repository
  */
 export async function chat(request: ChatRequest): Promise<string> {
-  const response = await fetch(`${API_BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((error as { error?: string }).error || `API error: ${response.status}`);
-  }
-
-  const data = await response.json() as ChatResponse;
+  const data = await postJson<ChatResponse>('/api/chat', request);
   return data.response;
 }
 
@@ -164,18 +132,37 @@ export interface Challenge {
  * Generate challenges for a learning module
  */
 export async function generateChallenges(request: ChallengeRequest): Promise<Challenge[]> {
-  const response = await fetch(`${API_BASE}/api/challenge`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
+  const data = await postJson<{ challenges: Challenge[] }>('/api/challenge', request);
+  return data.challenges || [];
+}
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error((error as { error?: string }).error || `API error: ${response.status}`);
+async function postJson<T>(path: string, payload: unknown): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Please retry.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  const data = await response.json() as { challenges: Challenge[] };
-  return data.challenges || [];
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({ error: 'Unknown error' }));
+    const message = (errorBody as { error?: string }).error || `API error: ${response.status}`;
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<T>;
 }
 
